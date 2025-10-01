@@ -4,10 +4,12 @@ from typing import Any
 
 import litellm
 
+from .model_configs import get_safe_token_limit
+
 
 logger = logging.getLogger(__name__)
 
-
+# Default fallback limit - will be overridden by model-specific limits
 MAX_TOTAL_TOKENS = 100_000
 MIN_RECENT_MESSAGES = 15
 
@@ -148,10 +150,13 @@ class MemoryCompressor:
         model_name: str | None = None,
     ):
         self.max_images = max_images
-        self.model_name = model_name or os.getenv("STRIX_LLM", "openai/gpt-5")
+        self.model_name = model_name or os.getenv("STRIX_LLM", "openai/gpt-4o")
 
         if not self.model_name:
             raise ValueError("STRIX_LLM environment variable must be set and not empty")
+        
+        # Set dynamic token limit based on model
+        self.max_tokens = get_safe_token_limit(self.model_name, safety_margin=0.9)
 
     def compress_history(
         self,
@@ -195,7 +200,7 @@ class MemoryCompressor:
             _get_message_tokens(msg, model_name) for msg in system_msgs + regular_msgs
         )
 
-        if total_tokens <= MAX_TOTAL_TOKENS * 0.9:
+        if total_tokens <= self.max_tokens:
             return messages
 
         compressed = []

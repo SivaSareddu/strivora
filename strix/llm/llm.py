@@ -16,6 +16,7 @@ from litellm.utils import supports_prompt_caching
 
 from strix.llm.config import LLMConfig
 from strix.llm.memory_compressor import MemoryCompressor
+from strix.llm.model_configs import get_model_context_limit
 from strix.llm.request_queue import get_global_queue
 from strix.llm.utils import _truncate_to_first_function, parse_tool_invocations
 from strix.prompts import load_prompt_modules
@@ -274,7 +275,14 @@ class LLM:
         except litellm.NotFoundError as e:
             raise LLMRequestFailedError("LLM request failed: Model not found", str(e)) from e
         except litellm.ContextWindowExceededError as e:
-            raise LLMRequestFailedError("LLM request failed: Context too long", str(e)) from e
+            model_limit = get_model_context_limit(self.config.model_name)
+            error_msg = (
+                f"LLM request failed: Context window exceeded. "
+                f"Model '{self.config.model_name}' has a {model_limit:,} token limit. "
+                f"Consider using a model with a larger context window or reducing input size. "
+                f"Error details: {str(e)}"
+            )
+            raise LLMRequestFailedError(error_msg, str(e)) from e
         except litellm.ContentPolicyViolationError as e:
             raise LLMRequestFailedError(
                 "LLM request failed: Content policy violation", str(e)

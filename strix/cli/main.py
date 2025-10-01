@@ -125,7 +125,7 @@ def validate_environment() -> None:
                     )
 
         error_text.append("\nExample setup:\n", style="white")
-        error_text.append("export STRIX_LLM='openai/gpt-5'\n", style="dim white")
+        error_text.append("export STRIX_LLM='openai/gpt-4o'\n", style="dim white")
 
         if "LLM_API_KEY" in missing_required_vars:
             error_text.append("export LLM_API_KEY='your-api-key-here'\n", style="dim white")
@@ -193,7 +193,7 @@ async def warm_up_llm() -> None:
     console = Console()
 
     try:
-        model_name = os.getenv("STRIX_LLM", "openai/gpt-5")
+        model_name = os.getenv("STRIX_LLM", "openai/gpt-4o")
         api_key = os.getenv("LLM_API_KEY")
 
         if api_key:
