@@ -4,18 +4,20 @@
     <description>List and filter proxy requests using HTTPQL with pagination.</description>
     <parameters>
       <parameter name="httpql_filter" type="string" required="false">
-        <description>HTTPQL filter using Caido's syntax:
+        <description>Filter expression for BurpSuite Pro requests:
 
-        Integer fields (port, code, roundtrip, id) - eq, gt, gte, lt, lte, ne:
-        - resp.code.eq:200, resp.code.gte:400, req.port.eq:443
+        Basic filters:
+        - method:GET, method:POST
+        - status:200, status:404
+        - host:example.com
+        - path:/api/
 
-        Text/byte fields (ext, host, method, path, query, raw) - regex:
-        - req.method.regex:"POST", req.path.regex:"/api/.*", req.host.regex:".*.com"
+        Advanced filters:
+        - url contains "api"
+        - response contains "error"
+        - header contains "authorization"
 
-        Date fields (created_at) - gt, lt with ISO formats:
-        - req.created_at.gt:"2024-01-01T00:00:00Z"
-
-        Special: source:intercept, preset:"name"</description>
+        Note: BurpSuite Pro provides comprehensive filtering through its REST API</description>
       </parameter>
       <parameter name="start_page" type="integer" required="false">
         <description>Starting page (1-based)</description>
@@ -160,7 +162,7 @@
   </tool>
 
   <tool name="scope_rules">
-    <description>Manage proxy scope patterns for domain/file filtering using Caido's scope system.</description>
+    <description>Manage proxy scope patterns for domain/file filtering using BurpSuite Pro's scope system.</description>
     <parameters>
       <parameter name="action" type="string" required="true">
         <description>Scope action:

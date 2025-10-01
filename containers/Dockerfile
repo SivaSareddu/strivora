@@ -115,6 +115,41 @@ RUN curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/
 
 RUN apt-get install -y wapiti
 
+# Install BurpSuite Pro with REST API extension
+RUN ARCH=$(uname -m) && \
+    if [ "$ARCH" = "x86_64" ]; then \
+        BURP_ARCH="x64"; \
+    elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then \
+        BURP_ARCH="arm64"; \
+    else \
+        echo "Unsupported architecture: $ARCH" && exit 1; \
+    fi && \
+    # Download BurpSuite Pro (requires license)
+    wget -O burpsuite-pro.jar https://portswigger.net/burp/releases/download?product=pro&version=2024.12.1&type=jar && \
+    # Download burp-rest-api extension
+    wget -O burp-rest-api.jar https://github.com/vmware/burp-rest-api/releases/download/v2.3.2/burp-rest-api-2.3.2.jar && \
+    # Create wrapper script for BurpSuite Pro with REST API
+    cat > /usr/local/bin/burpsuite-pro << 'EOF'
+#!/bin/bash
+# BurpSuite Pro wrapper script with REST API extension
+export BURP_PORT=${BURP_PORT:-8080}
+export BURP_API_PORT=${BURP_API_PORT:-8090}
+export BURP_API_TOKEN=${BURP_API_TOKEN:-}
+
+# Start BurpSuite Pro in headless mode with REST API extension
+java --add-opens=java.desktop/javax.swing=ALL-UNNAMED \
+     --add-opens=java.base/java.lang=ALL-UNNAMED \
+     -cp "burpsuite-pro.jar:burp-rest-api.jar" \
+     org.springframework.boot.loader.launch.JarLauncher \
+     --headless.mode=true \
+     --server.port=$BURP_API_PORT \
+     --server.address=0.0.0.0 \
+     --proxy.port=$BURP_PORT \
+     --proxy.address=0.0.0.0 \
+     --apikey=$BURP_API_TOKEN &
+EOF
+    chmod +x /usr/local/bin/burpsuite-pro
+
 USER pentester
 
 RUN pipx install semgrep && \

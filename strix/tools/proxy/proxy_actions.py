@@ -2,7 +2,7 @@ from typing import Any, Literal
 
 from strix.tools.registry import register_tool
 
-from .proxy_manager import get_proxy_manager
+from .burp_proxy_manager import get_burp_proxy_manager
 
 
 RequestPart = Literal["request", "response"]
@@ -27,10 +27,9 @@ def list_requests(
     sort_order: Literal["asc", "desc"] = "desc",
     scope_id: str | None = None,
 ) -> dict[str, Any]:
-    manager = get_proxy_manager()
-    return manager.list_requests(
-        httpql_filter, start_page, end_page, page_size, sort_by, sort_order, scope_id
-    )
+    import asyncio
+    manager = asyncio.run(get_burp_proxy_manager())
+    return asyncio.run(manager.get_captured_requests(limit=page_size))
 
 
 @register_tool
@@ -41,8 +40,9 @@ def view_request(
     page: int = 1,
     page_size: int = 50,
 ) -> dict[str, Any]:
-    manager = get_proxy_manager()
-    return manager.view_request(request_id, part, search_pattern, page, page_size)
+    import asyncio
+    manager = asyncio.run(get_burp_proxy_manager())
+    return asyncio.run(manager.get_request_details(request_id))
 
 
 @register_tool
@@ -55,8 +55,9 @@ def send_request(
 ) -> dict[str, Any]:
     if headers is None:
         headers = {}
-    manager = get_proxy_manager()
-    return manager.send_simple_request(method, url, headers, body, timeout)
+    import asyncio
+    manager = asyncio.run(get_burp_proxy_manager())
+    return asyncio.run(manager.send_request(method, url, headers, body))
 
 
 @register_tool
@@ -66,8 +67,11 @@ def repeat_request(
 ) -> dict[str, Any]:
     if modifications is None:
         modifications = {}
-    manager = get_proxy_manager()
-    return manager.repeat_request(request_id, modifications)
+    import asyncio
+    manager = asyncio.run(get_burp_proxy_manager())
+    # For now, return a placeholder - this would need to be implemented
+    # based on the specific BurpSuite Pro API capabilities
+    return {"status": "not_implemented", "message": "Repeat request not yet implemented for BurpSuite Pro"}
 
 
 @register_tool
@@ -78,8 +82,17 @@ def scope_rules(
     scope_id: str | None = None,
     scope_name: str | None = None,
 ) -> dict[str, Any]:
-    manager = get_proxy_manager()
-    return manager.scope_rules(action, allowlist, denylist, scope_id, scope_name)
+    import asyncio
+    manager = asyncio.run(get_burp_proxy_manager())
+    
+    if action == "get":
+        return asyncio.run(manager.get_scope())
+    elif action == "create" and allowlist:
+        return asyncio.run(manager.add_to_scope(allowlist))
+    elif action == "delete" and denylist:
+        return asyncio.run(manager.remove_from_scope(denylist))
+    else:
+        return {"status": "not_implemented", "message": f"Action {action} not yet implemented for BurpSuite Pro"}
 
 
 @register_tool
@@ -89,13 +102,15 @@ def list_sitemap(
     depth: Literal["DIRECT", "ALL"] = "DIRECT",
     page: int = 1,
 ) -> dict[str, Any]:
-    manager = get_proxy_manager()
-    return manager.list_sitemap(scope_id, parent_id, depth, page)
+    import asyncio
+    manager = asyncio.run(get_burp_proxy_manager())
+    return asyncio.run(manager.get_target_info())
 
 
 @register_tool
 def view_sitemap_entry(
     entry_id: str,
 ) -> dict[str, Any]:
-    manager = get_proxy_manager()
-    return manager.view_sitemap_entry(entry_id)
+    import asyncio
+    manager = asyncio.run(get_burp_proxy_manager())
+    return asyncio.run(manager.get_request_details(entry_id))
