@@ -4,7 +4,7 @@
     <description>List and filter proxy requests using HTTPQL with pagination.</description>
     <parameters>
       <parameter name="httpql_filter" type="string" required="false">
-        <description>Filter expression for BurpSuite Pro requests:
+        <description>Filter expression using HTTPQL (Caido's query language):
 
         Basic filters:
         - method:GET, method:POST
@@ -17,7 +17,7 @@
         - response contains "error"
         - header contains "authorization"
 
-        Note: BurpSuite Pro provides comprehensive filtering through its REST API</description>
+        Note: Caido provides comprehensive filtering through its GraphQL API with HTTPQL</description>
       </parameter>
       <parameter name="start_page" type="integer" required="false">
         <description>Starting page (1-based)</description>
@@ -162,7 +162,7 @@
   </tool>
 
   <tool name="scope_rules">
-    <description>Manage proxy scope patterns for domain/file filtering using BurpSuite Pro's scope system.</description>
+    <description>Manage proxy scope patterns for domain/file filtering using Caido's scope system.</description>
     <parameters>
       <parameter name="action" type="string" required="true">
         <description>Scope action:

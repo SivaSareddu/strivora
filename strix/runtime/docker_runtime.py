@@ -97,8 +97,7 @@ class DockerRuntime(AbstractRuntime):
                 except DockerException as e:
                     logger.warning(f"Error checking/removing existing container: {e}")
 
-                burp_port = self._find_available_port()
-                burp_api_port = self._find_available_port()
+                caido_port = self._find_available_port()
                 tool_server_port = self._find_available_port()
                 tool_server_token = self._generate_sandbox_token()
 
@@ -112,16 +111,14 @@ class DockerRuntime(AbstractRuntime):
                     name=container_name,
                     hostname=f"strix-scan-{scan_id}",
                     ports={
-                        f"{burp_port}/tcp": burp_port,
-                        f"{burp_api_port}/tcp": burp_api_port,
+                        f"{caido_port}/tcp": caido_port,
                         f"{tool_server_port}/tcp": tool_server_port,
                     },
                     cap_add=["NET_ADMIN", "NET_RAW"],
                     labels={"strix-scan-id": scan_id},
                     environment={
                         "PYTHONUNBUFFERED": "1",
-                        "BURP_PORT": str(burp_port),
-                        "BURP_API_PORT": str(burp_api_port),
+                        "CAIDO_PORT": str(caido_port),
                         "TOOL_SERVER_PORT": str(tool_server_port),
                         "TOOL_SERVER_TOKEN": tool_server_token,
                     },
@@ -132,7 +129,7 @@ class DockerRuntime(AbstractRuntime):
                 logger.info("Created container %s for scan %s", container.id, scan_id)
 
                 self._initialize_container(
-                    container, burp_port, burp_api_port, tool_server_port, tool_server_token
+                    container, caido_port, tool_server_port, tool_server_token
                 )
             except DockerException as e:
                 last_exception = e
@@ -227,24 +224,28 @@ class DockerRuntime(AbstractRuntime):
         return self._create_container_with_retry(scan_id)
 
     def _initialize_container(
-        self, container: Container, burp_port: int, burp_api_port: int, tool_server_port: int, tool_server_token: str
+        self, container: Container, caido_port: int, tool_server_port: int, tool_server_token: str
     ) -> None:
-        logger.info("Initializing BurpSuite Pro on port %s with API on port %s", burp_port, burp_api_port)
+        logger.info("Initializing Caido proxy on port %s", caido_port)
+        
+        # Start Caido proxy
         result = container.exec_run(
-            f"bash -c 'export BURP_PORT={burp_port} && export BURP_API_PORT={burp_api_port} && /usr/local/bin/docker-entrypoint.sh true'",
+            f"bash -c 'export CAIDO_PORT={caido_port} && /usr/local/bin/docker-entrypoint.sh true'",
             detach=False,
         )
 
         time.sleep(5)
 
+        # Get Caido API token if available
         result = container.exec_run(
-            "bash -c 'source /etc/profile.d/proxy.sh && echo $BURP_API_TOKEN'", user="pentester"
+            "bash -c 'source /etc/profile.d/proxy.sh && echo $CAIDO_API_TOKEN'", user="pentester"
         )
-        burp_token = result.output.decode().strip() if result.exit_code == 0 else ""
+        caido_token = result.output.decode().strip() if result.exit_code == 0 else ""
 
+        # Start tool server with Caido configuration
         container.exec_run(
             f"bash -c 'source /etc/profile.d/proxy.sh && cd /app && "
-            f"STRIX_SANDBOX_MODE=true BURP_API_TOKEN={burp_token} BURP_PORT={burp_port} BURP_API_URL=http://localhost:{burp_api_port} "
+            f"STRIX_SANDBOX_MODE=true CAIDO_API_TOKEN={caido_token} CAIDO_PORT={caido_port} "
             f"poetry run python strix/runtime/tool_server.py --token {tool_server_token} "
             f"--host 0.0.0.0 --port {tool_server_port} &'",
             detach=True,
