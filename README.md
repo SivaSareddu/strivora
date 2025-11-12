@@ -57,7 +57,10 @@ export LLM_API_KEY="your-api-key"
 strix --target ./app-directory
 ```
 
-First run pulls the sandbox Docker image. Results are saved under `agent_runs/<run-name>`.
+First run pulls the sandbox Docker image. Results are saved under `agent_runs/<run-name>`, including:
+- Security scan reports
+- Vulnerability findings
+- **Agent execution graphs** (visual diagrams showing how agents collaborated)
 
 ### ☁️ Cloud Hosted
 
@@ -90,6 +93,7 @@ Want to skip the setup? Try our cloud-hosted version: **[usestrix.com](https://u
 - **Distributed Workflows** - Specialized agents for different attacks and assets
 - **Scalable Testing** - Parallel execution for fast comprehensive coverage
 - **Dynamic Coordination** - Agents collaborate and share discoveries
+- **Visual Execution Graphs** - Auto-generated diagrams showing agent collaboration (see [AGENT_GRAPH.md](./AGENT_GRAPH.md))
 
 
 ## 💻 Usage Examples

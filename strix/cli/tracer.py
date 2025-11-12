@@ -1,3 +1,4 @@
+import json
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
@@ -247,6 +248,9 @@ class Tracer:
                 )
                 logger.info(f"Saved vulnerability index to: {vuln_csv_file}")
 
+            # Save agent graph in multiple formats
+            self._save_agent_graph(run_dir)
+
             logger.info(f"📊 Essential scan data saved to: {run_dir}")
 
         except (OSError, RuntimeError):
@@ -306,6 +310,208 @@ class Tracer:
             "total": total_stats,
             "total_tokens": total_stats["input_tokens"] + total_stats["output_tokens"],
         }
+
+    def _generate_mermaid_graph(self, agent_graph: dict[str, Any]) -> str:
+        """Generate a Mermaid diagram representation of the agent graph."""
+        lines = ["graph TD"]
+        
+        # Status styling
+        lines.append("    classDef running fill:#22c55e,stroke:#16a34a,color:#000")
+        lines.append("    classDef waiting fill:#fbbf24,stroke:#f59e0b,color:#000")
+        lines.append("    classDef completed fill:#10b981,stroke:#059669,color:#000")
+        lines.append("    classDef failed fill:#ef4444,stroke:#dc2626,color:#fff")
+        lines.append("    classDef stopped fill:#6b7280,stroke:#4b5563,color:#fff")
+        lines.append("")
+        
+        # Create nodes
+        nodes = agent_graph.get("nodes", {})
+        edges = agent_graph.get("edges", [])
+        
+        if not nodes:
+            lines.append("    NoAgents[No agents in graph]")
+            return "\n".join(lines)
+        
+        # Add all nodes with labels
+        for agent_id, node in nodes.items():
+            name = node.get("name", "Unknown")
+            status = node.get("status", "unknown")
+            # Sanitize node name for Mermaid
+            safe_id = agent_id.replace("-", "_")
+            label = f"{name}\\n{status}"
+            lines.append(f'    {safe_id}["{label}"]')
+            
+            # Apply styling based on status
+            if status == "running":
+                lines.append(f"    class {safe_id} running")
+            elif status == "waiting":
+                lines.append(f"    class {safe_id} waiting")
+            elif status == "completed":
+                lines.append(f"    class {safe_id} completed")
+            elif status in ["failed", "error"]:
+                lines.append(f"    class {safe_id} failed")
+            elif status == "stopped":
+                lines.append(f"    class {safe_id} stopped")
+        
+        lines.append("")
+        
+        # Add delegation edges
+        delegation_edges = [e for e in edges if e.get("type") == "delegation"]
+        for edge in delegation_edges:
+            from_id = edge.get("from", "").replace("-", "_")
+            to_id = edge.get("to", "").replace("-", "_")
+            if from_id and to_id:
+                lines.append(f"    {from_id} --> {to_id}")
+        
+        # Add message edges (with different style)
+        message_edges = [e for e in edges if e.get("type") == "message"]
+        if message_edges:
+            lines.append("")
+            lines.append("    %% Inter-agent messages")
+            for edge in message_edges:
+                from_id = edge.get("from", "").replace("-", "_")
+                to_id = edge.get("to", "").replace("-", "_")
+                if from_id and to_id and from_id != "user":
+                    msg_type = edge.get("message_type", "msg")
+                    lines.append(f"    {from_id} -.{msg_type}.-> {to_id}")
+        
+        return "\n".join(lines)
+
+    def _generate_text_graph(self, agent_graph: dict[str, Any]) -> str:
+        """Generate a human-readable text representation of the agent graph."""
+        lines = ["# Agent Graph Structure", ""]
+        
+        nodes = agent_graph.get("nodes", {})
+        edges = agent_graph.get("edges", [])
+        
+        if not nodes:
+            lines.append("No agents in the graph.")
+            return "\n".join(lines)
+        
+        # Find root agent(s)
+        root_agents = [
+            agent_id for agent_id, node in nodes.items()
+            if node.get("parent_id") is None
+        ]
+        
+        if not root_agents and nodes:
+            root_agents = [next(iter(nodes.keys()))]
+        
+        def build_tree(agent_id: str, depth: int = 0) -> None:
+            if agent_id not in nodes:
+                return
+                
+            node = nodes[agent_id]
+            indent = "  " * depth
+            prefix = "└─ " if depth > 0 else ""
+            
+            name = node.get("name", "Unknown")
+            status = node.get("status", "unknown")
+            task = node.get("task", "No task")
+            
+            # Status emoji
+            status_emoji = {
+                "running": "🟢",
+                "waiting": "🟡",
+                "completed": "✅",
+                "failed": "❌",
+                "stopped": "⏹️",
+                "error": "🔴",
+            }.get(status, "⚪")
+            
+            lines.append(f"{indent}{prefix}{status_emoji} **{name}** ({agent_id})")
+            lines.append(f"{indent}   Status: {status}")
+            lines.append(f"{indent}   Task: {task[:100]}{'...' if len(task) > 100 else ''}")
+            
+            if node.get("finished_at"):
+                lines.append(f"{indent}   Completed: {node['finished_at']}")
+            
+            lines.append("")
+            
+            # Find children
+            children = [
+                edge["to"] for edge in edges
+                if edge.get("from") == agent_id and edge.get("type") == "delegation"
+            ]
+            
+            for child_id in children:
+                build_tree(child_id, depth + 1)
+        
+        # Build tree for each root
+        for root_id in root_agents:
+            build_tree(root_id)
+        
+        # Add summary statistics
+        lines.append("---")
+        lines.append("")
+        lines.append("## Summary Statistics")
+        lines.append("")
+        lines.append(f"- **Total Agents**: {len(nodes)}")
+        
+        status_counts = {}
+        for node in nodes.values():
+            status = node.get("status", "unknown")
+            status_counts[status] = status_counts.get(status, 0) + 1
+        
+        for status, count in sorted(status_counts.items()):
+            lines.append(f"- **{status.capitalize()}**: {count}")
+        
+        lines.append(f"- **Total Edges**: {len(edges)}")
+        delegation_count = sum(1 for e in edges if e.get("type") == "delegation")
+        message_count = sum(1 for e in edges if e.get("type") == "message")
+        lines.append(f"  - Delegation: {delegation_count}")
+        lines.append(f"  - Messages: {message_count}")
+        
+        return "\n".join(lines)
+
+    def _save_agent_graph(self, run_dir: Path) -> None:
+        """Save the agent graph in multiple formats."""
+        try:
+            from strix.tools.agents_graph.agents_graph_actions import _agent_graph
+            
+            if not _agent_graph.get("nodes"):
+                logger.info("No agent graph data to save (no agents were created)")
+                return
+            
+            # 1. Save raw JSON
+            graph_json_file = run_dir / "agent_graph.json"
+            with graph_json_file.open("w", encoding="utf-8") as f:
+                json.dump(_agent_graph, f, indent=2, default=str)
+            logger.info(f"Saved agent graph JSON to: {graph_json_file}")
+            
+            # 2. Save Mermaid diagram
+            mermaid_content = self._generate_mermaid_graph(_agent_graph)
+            mermaid_file = run_dir / "agent_graph.mmd"
+            with mermaid_file.open("w", encoding="utf-8") as f:
+                f.write(mermaid_content)
+            logger.info(f"Saved agent graph Mermaid diagram to: {mermaid_file}")
+            
+            # 3. Save Markdown with embedded Mermaid
+            markdown_file = run_dir / "agent_graph.md"
+            with markdown_file.open("w", encoding="utf-8") as f:
+                f.write("# Agent Execution Graph\n\n")
+                f.write(f"**Generated:** {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')}\n\n")
+                f.write("## Visual Diagram\n\n")
+                f.write("```mermaid\n")
+                f.write(mermaid_content)
+                f.write("\n```\n\n")
+                f.write(self._generate_text_graph(_agent_graph))
+            logger.info(f"Saved agent graph markdown to: {markdown_file}")
+            
+            # 4. Save detailed node information
+            nodes_file = run_dir / "agent_nodes.json"
+            nodes_data = {
+                "generated_at": datetime.now(UTC).isoformat(),
+                "total_agents": len(_agent_graph.get("nodes", {})),
+                "agents": _agent_graph.get("nodes", {}),
+            }
+            with nodes_file.open("w", encoding="utf-8") as f:
+                json.dump(nodes_data, f, indent=2, default=str)
+            logger.info(f"Saved detailed agent nodes to: {nodes_file}")
+            
+        except ImportError:
+            logger.warning("Could not import agent graph (agents_graph module not available)")
+        except (OSError, RuntimeError):
+            logger.exception("Failed to save agent graph")
 
     def cleanup(self) -> None:
         self.save_run_data()
