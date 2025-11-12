@@ -1,0 +1,111 @@
+@startuml Inter-Agent Communication Sequence
+title Inter-Agent Communication Sequence
+
+participant "Sender Agent" as Sender
+participant "Agent Graph Actions" as GraphActions
+participant "Agent Graph" as Graph
+participant "Message Queue" as Queue
+participant "Receiver Agent" as Receiver
+participant "AgentState" as ReceiverState
+participant "Tracer" as Tracer
+
+== Sending Message ==
+
+Sender -> Sender: Invokes send_message_to_agent tool
+Sender -> GraphActions: send_message_to_agent(target_id, message, type, priority)
+activate GraphActions
+
+GraphActions -> Graph: Validate target_agent_id exists
+GraphActions -> GraphActions: Create message_data
+activate GraphActions
+note right of GraphActions: {id, from, to, content,\nmessage_type, priority, timestamp}
+
+GraphActions -> Queue: Append to target agent's message queue
+activate Queue
+Queue -> Queue: Store message
+deactivate Queue
+
+GraphActions -> Graph: Add message edge to graph
+GraphActions -> GraphActions: Mark message as delivered
+
+GraphActions --> Sender: {success: true, message_id}
+deactivate GraphActions
+
+== Receiving Message ==
+
+Receiver -> Receiver: _check_agent_messages()
+activate Receiver
+
+Receiver -> GraphActions: Check _agent_messages[agent_id]
+activate GraphActions
+GraphActions -> Queue: Get messages for agent_id
+activate Queue
+Queue --> GraphActions: messages[]
+deactivate Queue
+GraphActions --> Receiver: messages[]
+deactivate GraphActions
+
+alt Has unread messages
+    loop For each unread message
+        Receiver -> Receiver: Check message.read == False
+        
+        alt Sender is user
+            Receiver -> ReceiverState: add_message("user", content)
+        else Sender is another agent
+            Receiver -> GraphActions: Get sender name from graph
+            activate GraphActions
+            GraphActions --> Receiver: sender_name
+            deactivate GraphActions
+            
+            Receiver -> Receiver: Build inter_agent_message XML
+            Receiver -> ReceiverState: add_message("user", message_xml)
+        end
+        
+        Receiver -> Queue: Mark message.read = True
+        
+        alt Receiver was waiting
+            Receiver -> ReceiverState: resume_from_waiting()
+            Receiver -> Tracer: update_agent_status("running")
+            activate Tracer
+            Tracer --> Receiver
+            deactivate Tracer
+        end
+    end
+end
+
+Receiver --> Receiver: Continue agent loop
+deactivate Receiver
+
+== User Message ==
+
+actor User
+participant "CLI App" as CLI
+
+User -> CLI: Send message via UI
+activate CLI
+
+CLI -> GraphActions: send_user_message_to_agent(agent_id, message)
+activate GraphActions
+
+GraphActions -> Queue: Add user message
+activate Queue
+Queue -> Queue: Store message with from="user"
+deactivate Queue
+
+GraphActions -> Tracer: log_chat_message()
+activate Tracer
+Tracer --> GraphActions
+deactivate Tracer
+
+GraphActions --> CLI: {success: true}
+deactivate GraphActions
+
+CLI --> User: Message sent
+deactivate CLI
+
+Receiver -> Receiver: _check_agent_messages() (next iteration)
+Receiver -> ReceiverState: add_message("user", message)
+Receiver -> Receiver: Process user input
+
+@enduml
+

@@ -1,0 +1,98 @@
+@startuml Sandbox Creation and Tool Execution Sequence
+title Sandbox Creation and Tool Execution Sequence
+
+participant "BaseAgent" as Agent
+participant "AgentState" as State
+participant "DockerRuntime" as Runtime
+participant "Docker Client" as Docker
+participant "Container" as Container
+participant "Tool Server" as ToolServer
+participant "Tool Executor" as Executor
+participant "Tool Function" as Tool
+
+== Sandbox Creation ==
+
+Agent -> Agent: _initialize_sandbox_and_state()
+Agent -> Runtime: create_sandbox(agent_id, token, local_path)
+activate Runtime
+
+Runtime -> Runtime: _get_scan_id(agent_id)
+Runtime -> Runtime: _get_or_create_scan_container(scan_id)
+activate Runtime
+
+alt Container doesn't exist
+    Runtime -> Docker: Create container
+    activate Docker
+    Docker -> Container: Run container
+    activate Container
+    
+    Container -> Container: Start Caido proxy
+    Container -> ToolServer: Start tool server
+    activate ToolServer
+    ToolServer -> ToolServer: Initialize with token
+    deactivate ToolServer
+    
+    deactivate Container
+    deactivate Docker
+else Container exists
+    Runtime -> Container: Start if stopped
+    activate Container
+    deactivate Container
+end
+
+Runtime -> Runtime: _copy_local_directory_to_container(local_path)
+Runtime -> Runtime: _register_agent_with_tool_server()
+Runtime -> Runtime: get_sandbox_url(container_id, port)
+
+Runtime --> Agent: SandboxInfo(workspace_id, api_url, token, port)
+deactivate Runtime
+
+Agent -> State: Set sandbox_id, sandbox_token, sandbox_info
+
+== Tool Execution ==
+
+Agent -> Executor: process_tool_invocations(tool_invocations, state)
+activate Executor
+
+Executor -> Executor: execute_tool(tool_name, agent_state, **kwargs)
+activate Executor
+
+alt Tool requires sandbox
+    Executor -> Executor: _execute_tool_in_sandbox()
+    activate Executor
+    
+    Executor -> Runtime: get_sandbox_url(container_id, port)
+    Runtime --> Executor: api_url
+    
+    Executor -> ToolServer: POST /execute\n{agent_id, tool_name, kwargs}
+    activate ToolServer
+    
+    ToolServer -> ToolServer: Validate token
+    ToolServer -> ToolServer: Execute tool in sandbox context
+    ToolServer -> Tool: Call tool function
+    activate Tool
+    Tool --> ToolServer: result
+    deactivate Tool
+    
+    ToolServer --> Executor: {result: ...}
+    deactivate ToolServer
+    
+    Executor --> Agent: result
+    deactivate Executor
+else Tool executes locally
+    Executor -> Executor: _execute_tool_locally()
+    activate Executor
+    
+    Executor -> Tool: Call tool function
+    activate Tool
+    Tool --> Executor: result
+    deactivate Tool
+    
+    Executor --> Agent: result
+    deactivate Executor
+end
+
+deactivate Executor
+
+@enduml
+

@@ -1,0 +1,121 @@
+@startuml Multi-Agent Creation and Delegation Sequence
+title Multi-Agent Creation and Delegation Sequence
+
+participant "Parent Agent" as Parent
+participant "Agent Graph Actions" as GraphActions
+participant "AgentState" as ParentState
+participant "StrixAgent" as SubAgent
+participant "BaseAgent" as SubBaseAgent
+participant "AgentState" as SubState
+participant "Thread" as Thread
+participant "Tracer" as Tracer
+participant "Agent Graph" as Graph
+
+== Agent Creation Request ==
+
+Parent -> Parent: Invokes create_agent tool
+Parent -> GraphActions: create_agent(task, name, inherit_context, prompt_modules)
+activate GraphActions
+
+GraphActions -> ParentState: Get agent_id (parent_id)
+GraphActions -> GraphActions: Validate prompt_modules
+
+GraphActions -> SubState: AgentState(task, name, parent_id)
+activate SubState
+SubState -> SubState: Generate unique agent_id
+deactivate SubState
+
+GraphActions -> SubAgent: StrixAgent(config with state)
+activate SubAgent
+
+SubAgent -> SubBaseAgent: __init__(config)
+activate SubBaseAgent
+
+SubBaseAgent -> SubBaseAgent: Initialize LLM with prompt_modules
+SubBaseAgent -> SubState: Initialize state
+SubBaseAgent -> Tracer: log_agent_creation()
+activate Tracer
+Tracer -> Graph: Add node to graph
+Tracer --> SubBaseAgent
+deactivate Tracer
+
+SubBaseAgent -> GraphActions: _add_to_agents_graph()
+activate GraphActions
+GraphActions -> Graph: Add node
+GraphActions -> Graph: Add delegation edge (parent -> child)
+GraphActions --> SubBaseAgent
+deactivate GraphActions
+
+SubBaseAgent --> SubAgent
+deactivate SubBaseAgent
+
+alt Inherit context
+    GraphActions -> ParentState: get_conversation_history()
+    ParentState --> GraphActions: inherited_messages
+end
+
+GraphActions -> GraphActions: Store agent instance
+GraphActions -> Thread: Start thread(_run_agent_in_thread)
+activate Thread
+
+GraphActions --> Parent: {success: true, agent_id, message}
+deactivate GraphActions
+
+== Sub-Agent Execution ==
+
+Thread -> GraphActions: _run_agent_in_thread(agent, state, inherited_messages)
+activate GraphActions
+
+alt Has inherited messages
+    GraphActions -> SubState: add_message("user", "<inherited_context>")
+    loop For each inherited message
+        GraphActions -> SubState: add_message(role, content)
+    end
+    GraphActions -> SubState: add_message("user", "</inherited_context>")
+end
+
+GraphActions -> GraphActions: Build delegation task XML
+GraphActions -> SubState: add_message("user", task_xml)
+
+GraphActions -> SubAgent: agent_loop(task)
+activate SubAgent
+
+SubAgent -> SubAgent: _initialize_sandbox_and_state(task)
+note right of SubAgent: Shares same container as parent
+
+SubAgent -> SubAgent: Main execution loop
+activate SubAgent
+
+loop Sub-agent execution
+    SubAgent -> SubAgent: Process iterations
+    SubAgent -> SubAgent: Execute tools
+    SubAgent -> SubAgent: Generate responses
+end
+
+SubAgent -> GraphActions: agent_finish(result_summary, findings)
+activate GraphActions
+
+GraphActions -> Graph: Update node status to "completed"
+GraphActions -> GraphActions: Build completion report XML
+
+alt Report to parent
+    GraphActions -> Graph: Add message to parent's inbox
+    GraphActions -> Parent: Notify parent agent
+end
+
+GraphActions --> SubAgent: {agent_completed: true}
+deactivate GraphActions
+
+SubAgent --> Thread: result
+deactivate SubAgent
+deactivate Thread
+deactivate GraphActions
+
+== Parent Receives Completion ==
+
+Parent -> Parent: _check_agent_messages()
+Parent -> ParentState: add_message("user", completion_report)
+Parent -> Parent: Continue processing
+
+@enduml
+

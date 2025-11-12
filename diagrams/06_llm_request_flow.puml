@@ -1,0 +1,132 @@
+@startuml LLM Request Flow Sequence
+title LLM Request Flow Sequence
+
+participant "BaseAgent" as Agent
+participant "AgentState" as State
+participant "LLM" as LLM
+participant "MemoryCompressor" as Compressor
+participant "RequestQueue" as Queue
+participant "LiteLLM" as LiteLLM
+participant "LLM Provider" as Provider
+
+== Request Preparation ==
+
+Agent -> Agent: _process_iteration()
+Agent -> State: get_conversation_history()
+State --> Agent: conversation_history[]
+
+Agent -> LLM: generate(conversation_history)
+activate LLM
+
+LLM -> LLM: Build system message
+LLM -> LLM: Load system prompt template
+
+LLM -> Compressor: compress_history(conversation_history)
+activate Compressor
+
+Compressor -> Compressor: Analyze message history
+Compressor -> Compressor: Remove redundant messages
+Compressor -> Compressor: Summarize old context
+
+Compressor --> LLM: compressed_history
+deactivate Compressor
+
+LLM -> State: Clear and extend with compressed history
+LLM -> LLM: messages = [system] + compressed_history
+
+== Cache Preparation ==
+
+alt Prompt caching enabled
+    LLM -> LLM: _prepare_cached_messages(messages)
+    activate LLM
+    
+    LLM -> LLM: _calculate_cache_interval(total_messages)
+    LLM -> LLM: Mark messages at intervals for caching
+    
+    LLM --> LLM: cached_messages
+    deactivate LLM
+else No caching
+    LLM -> LLM: Use messages as-is
+end
+
+== Making Request ==
+
+LLM -> LLM: _make_request(cached_messages)
+activate LLM
+
+LLM -> LLM: Build completion_args
+note right of LLM: {model, messages, temperature,\nstop, reasoning_effort}
+
+LLM -> Queue: make_request(completion_args)
+activate Queue
+
+Queue -> Queue: Queue request
+Queue -> LiteLLM: completion(**completion_args)
+activate LiteLLM
+
+LiteLLM -> LiteLLM: Prepare API request
+LiteLLM -> Provider: POST /v1/chat/completions
+activate Provider
+
+Provider -> Provider: Process request
+Provider -> Provider: Generate response
+
+Provider --> LiteLLM: ModelResponse
+deactivate Provider
+
+LiteLLM --> Queue: ModelResponse
+deactivate LiteLLM
+
+Queue --> LLM: ModelResponse
+deactivate Queue
+
+== Response Processing ==
+
+LLM -> LLM: _update_usage_stats(response)
+activate LLM
+
+LLM -> LLM: Extract input_tokens, output_tokens
+LLM -> LLM: Extract cached_tokens, cache_creation_tokens
+LLM -> LLM: Calculate cost
+
+LLM -> LLM: Update total_stats
+LLM -> LLM: Update last_request_stats
+
+LLM --> LLM: Stats updated
+deactivate LLM
+
+LLM -> LLM: Extract content from response
+LLM -> LLM: _truncate_to_first_function(content)
+
+alt Contains </function>
+    LLM -> LLM: Truncate at </function>
+end
+
+LLM -> LLM: parse_tool_invocations(content)
+LLM -> LLM: Extract tool calls from XML
+
+LLM --> Agent: LLMResponse(content, tool_invocations)
+deactivate LLM
+
+== Error Handling ==
+
+alt Rate limit error
+    LiteLLM -> LLM: RateLimitError
+    LLM -> LLM: Raise LLMRequestFailedError
+    LLM --> Agent: LLMRequestFailedError
+    Agent -> Agent: Handle error
+    Agent -> State: enter_waiting_state(llm_failed=True)
+else Context window exceeded
+    LiteLLM -> LLM: ContextWindowExceededError
+    LLM -> LLM: Raise LLMRequestFailedError with limit info
+    LLM --> Agent: LLMRequestFailedError
+    Agent -> Agent: Handle error
+else Other errors
+    LiteLLM -> LLM: Various exceptions
+    LLM -> LLM: Raise LLMRequestFailedError
+    LLM --> Agent: LLMRequestFailedError
+    Agent -> Agent: Handle error
+end
+
+@enduml
+

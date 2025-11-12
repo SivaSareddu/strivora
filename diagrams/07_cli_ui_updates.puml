@@ -1,0 +1,169 @@
+@startuml CLI UI Updates Sequence
+title CLI UI Updates Sequence
+
+participant "User" as User
+participant "CLI App" as App
+participant "UI Thread" as UIThread
+participant "Tracer" as Tracer
+participant "Agent Thread" as AgentThread
+participant "Agent" as Agent
+participant "Agent Graph" as Graph
+
+== UI Initialization ==
+
+App -> App: compose()
+App -> App: Mount UI components
+note right of App: Chat display, agents tree,\nstatus display, input area
+
+App -> App: _hide_splash_screen()
+App -> App: _start_scan_thread()
+App -> AgentThread: Start thread
+activate AgentThread
+
+App -> App: set_interval(0.5, _update_ui_from_tracer)
+activate App
+
+== Agent Execution ==
+
+AgentThread -> Agent: execute_scan()
+activate Agent
+Agent -> Agent: agent_loop()
+activate Agent
+
+== UI Update Loop ==
+
+loop Every 0.5 seconds
+    App -> App: _update_ui_from_tracer()
+    activate App
+    
+    App -> Tracer: Get agents dict
+    activate Tracer
+    Tracer --> App: agents{}
+    deactivate Tracer
+    
+    loop For each agent
+        alt Agent not displayed
+            App -> App: _add_agent_node(agent_data)
+            activate App
+            App -> Graph: Add node to tree
+            App -> App: Update agent status icon
+            deactivate App
+        else Agent status changed
+            App -> App: _update_agent_node(agent_id, agent_data)
+            activate App
+            App -> App: Update status icon
+            App -> App: Update label
+            deactivate App
+        end
+    end
+    
+    App -> App: _update_chat_view()
+    activate App
+    
+    alt Agent selected
+        App -> App: _gather_agent_events(agent_id)
+        activate App
+        App -> Tracer: Get chat_messages for agent_id
+        App -> Tracer: Get tool_executions for agent_id
+        Tracer --> App: events[]
+        deactivate App
+        
+        App -> App: _get_rendered_events_content(events)
+        activate App
+        loop For each event
+            alt Chat event
+                App -> App: _render_chat_content()
+            else Tool event
+                App -> App: _render_tool_content_simple()
+                App -> App: Get tool renderer
+            end
+        end
+        App --> App: rendered_content
+        deactivate App
+        
+        App -> App: Update chat_display
+    end
+    
+    deactivate App
+    
+    App -> App: _update_agent_status_display()
+    activate App
+    
+    App -> Tracer: Get agent status
+    Tracer --> App: status
+    
+    alt Status is running
+        App -> App: Show animated verb text
+    else Status is waiting
+        App -> App: Show "Waiting..." animation
+    else Status is llm_failed
+        App -> App: Show error message
+    end
+    
+    deactivate App
+    
+    deactivate App
+end
+
+== User Interaction ==
+
+User -> App: Select agent in tree
+activate User
+User -> App: Tree.NodeHighlighted event
+activate App
+
+App -> App: handle_tree_highlight()
+App -> App: Set selected_agent_id
+App -> App: _update_chat_view()
+App -> App: _update_agent_status_display()
+
+deactivate App
+deactivate User
+
+User -> App: Type message and press Enter
+activate User
+User -> App: ChatTextArea._on_key()
+activate App
+
+App -> App: _send_user_message(message)
+activate App
+
+App -> Tracer: log_chat_message()
+activate Tracer
+Tracer --> App
+deactivate Tracer
+
+App -> Graph: send_user_message_to_agent(agent_id, message)
+activate Graph
+Graph -> Graph: Add message to queue
+Graph --> App: {success: true}
+deactivate Graph
+
+App -> App: _update_chat_view()
+App -> App: Clear input
+
+deactivate App
+deactivate User
+
+== Agent Updates ==
+
+Agent -> Tracer: log_chat_message()
+activate Agent
+activate Tracer
+Tracer -> Tracer: Store message
+Tracer --> Agent
+deactivate Tracer
+deactivate Agent
+
+Agent -> Tracer: log_tool_execution_start()
+activate Agent
+activate Tracer
+Tracer -> Tracer: Store tool execution
+Tracer --> Agent
+deactivate Tracer
+deactivate Agent
+
+note right of App: UI automatically picks up\nchanges on next update cycle
+
+@enduml
+

@@ -1,0 +1,94 @@
+@startuml CLI Startup and Agent Initialization Sequence
+title CLI Startup and Agent Initialization Sequence
+
+actor User
+participant "CLI (main.py)" as CLI
+participant "CLI App (app.py)" as App
+participant "Tracer" as Tracer
+participant "StrixAgent" as Agent
+participant "BaseAgent" as BaseAgent
+participant "DockerRuntime" as Runtime
+participant "Docker Container" as Container
+participant "Tool Server" as ToolServer
+
+User -> CLI: strix --target <target>
+activate CLI
+
+CLI -> CLI: check_docker_installed()
+CLI -> CLI: pull_docker_image()
+CLI -> CLI: validate_environment()
+CLI -> CLI: warm_up_llm()
+
+CLI -> App: run_strix_cli(args)
+activate App
+
+App -> Tracer: Tracer(run_name)
+activate Tracer
+Tracer -> Tracer: Initialize scan config
+deactivate Tracer
+
+App -> App: _build_scan_config()
+App -> App: _build_agent_config()
+
+App -> App: _start_scan_thread()
+activate App
+
+note right of App: Thread starts agent execution
+
+App -> Agent: StrixAgent(config)
+activate Agent
+
+Agent -> BaseAgent: __init__(config)
+activate BaseAgent
+
+BaseAgent -> BaseAgent: Initialize LLM
+BaseAgent -> BaseAgent: Initialize AgentState
+BaseAgent -> Tracer: log_agent_creation()
+activate Tracer
+Tracer -> Tracer: Register agent in graph
+deactivate Tracer
+
+BaseAgent -> BaseAgent: _add_to_agents_graph()
+BaseAgent -> BaseAgent: Add node to agent graph
+
+deactivate BaseAgent
+
+Agent -> Agent: execute_scan(scan_config)
+activate Agent
+
+Agent -> Runtime: create_sandbox(agent_id)
+activate Runtime
+
+Runtime -> Runtime: _get_scan_id(agent_id)
+Runtime -> Runtime: _get_or_create_scan_container(scan_id)
+
+alt Container doesn't exist
+    Runtime -> Container: Create container
+    activate Container
+    Container -> Container: Start Caido proxy
+    Container -> ToolServer: Start tool server
+    activate ToolServer
+    ToolServer -> ToolServer: Initialize with token
+    deactivate ToolServer
+    deactivate Container
+end
+
+Runtime -> Runtime: _copy_local_directory_to_container()
+Runtime -> Runtime: _register_agent_with_tool_server()
+Runtime -> Runtime: get_sandbox_url()
+
+Runtime --> Agent: SandboxInfo
+deactivate Runtime
+
+Agent -> Agent: agent_loop(task)
+activate Agent
+
+note right of Agent: Main execution loop begins
+
+Agent --> App: Agent running
+deactivate Agent
+
+deactivate App
+
+@enduml
+

@@ -1,0 +1,103 @@
+@startuml Agent Execution Loop Sequence
+title Agent Execution Loop Sequence
+
+participant "BaseAgent" as Agent
+participant "AgentState" as State
+participant "LLM" as LLM
+participant "Tool Executor" as Executor
+participant "Tool Server" as ToolServer
+participant "Tracer" as Tracer
+participant "Agent Graph" as Graph
+
+== Initialization ==
+
+Agent -> State: Initialize AgentState
+Agent -> Agent: _initialize_sandbox_and_state(task)
+Agent -> State: add_message("user", task)
+
+== Main Loop ==
+
+loop While not stopped
+    Agent -> Agent: _check_agent_messages()
+    
+    alt Has new messages
+        Agent -> State: add_message() from other agent/user
+        Agent -> Tracer: update_agent_status("running")
+    end
+    
+    alt Is waiting for input
+        Agent -> Agent: _wait_for_input()
+        note right: Skip to next iteration
+    else Should stop
+        Agent -> Agent: _enter_waiting_state()
+        note right: Skip to next iteration
+    else LLM failed
+        Agent -> Agent: _wait_for_input()
+        note right: Skip to next iteration
+    else Process iteration
+        Agent -> State: increment_iteration()
+        
+        Agent -> Agent: _process_iteration()
+        activate Agent
+        
+        Agent -> LLM: generate(conversation_history)
+        activate LLM
+        
+        LLM -> LLM: Compress memory
+        LLM -> LLM: Prepare cached messages
+        LLM -> LLM: _make_request(messages)
+        
+        LLM --> Agent: LLMResponse(content, tool_invocations)
+        deactivate LLM
+        
+        Agent -> State: add_message("assistant", content)
+        Agent -> Tracer: log_chat_message()
+        
+        alt Has tool invocations
+            Agent -> Agent: _execute_actions(actions)
+            activate Agent
+            
+            Agent -> Executor: process_tool_invocations(actions, state)
+            activate Executor
+            
+            loop For each tool invocation
+                Executor -> Executor: execute_tool_invocation()
+                Executor -> Tracer: log_tool_execution_start()
+                
+                alt Tool executes in sandbox
+                    Executor -> Executor: _execute_tool_in_sandbox()
+                    Executor -> ToolServer: POST /execute
+                    ToolServer --> Executor: result
+                else Tool executes locally
+                    Executor -> Executor: _execute_tool_locally()
+                    Executor --> Executor: result
+                end
+                
+                Executor -> Tracer: update_tool_execution()
+                Executor -> Executor: _format_tool_result()
+            end
+            
+            Executor -> State: add_message("user", tool_results)
+            Executor --> Agent: should_agent_finish
+            deactivate Executor
+            
+            alt Should finish
+                Agent -> State: set_completed()
+                Agent -> Tracer: update_agent_status("completed")
+                Agent -> Agent: _enter_waiting_state(task_completed=True)
+            end
+            
+            deactivate Agent
+        end
+        
+        deactivate Agent
+        
+        alt Error occurred
+            Agent -> Agent: _handle_iteration_error()
+            Agent -> Tracer: update_agent_status("error")
+        end
+    end
+end
+
+@enduml
+
