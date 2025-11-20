@@ -7,6 +7,17 @@ from typing import Any, cast
 
 from playwright.async_api import Browser, BrowserContext, Page, Playwright, async_playwright
 
+# Import adaptive login
+try:
+    from strix.tools.adaptive_login import (
+        should_use_adaptive_login,
+        get_login_config,
+        execute_adaptive_login_playwright,
+    )
+    ADAPTIVE_LOGIN_AVAILABLE = True
+except ImportError:
+    ADAPTIVE_LOGIN_AVAILABLE = False
+
 
 logger = logging.getLogger(__name__)
 
@@ -165,7 +176,38 @@ class BrowserInstance:
             raise ValueError(f"Tab '{tab_id}' not found")
 
         page = self.pages[tab_id]
-        await page.goto(url, wait_until="domcontentloaded")
+        
+        # Check if adaptive login is needed for this domain
+        if ADAPTIVE_LOGIN_AVAILABLE and should_use_adaptive_login(url):
+            logger.info(f"🔐 Adaptive login detected for domain: {url}")
+            login_config = get_login_config(url)
+            
+            if login_config:
+                logger.info(f"🚀 Executing adaptive login for {login_config['domain']}...")
+                # Navigate to login URL first
+                login_url = login_config.get("login_url", url)
+                await page.goto(login_url, wait_until="domcontentloaded")
+                await asyncio.sleep(2)
+                
+                # Execute adaptive login
+                result = await execute_adaptive_login_playwright(
+                    page=page,
+                    email=login_config["email"],
+                    password=login_config["password"],
+                    login_url=login_url,
+                )
+                
+                if result.get("success"):
+                    logger.info(f"✅ Adaptive login successful: {result.get('stage')}")
+                else:
+                    logger.warning(f"⚠️  Adaptive login failed: {result.get('error')}")
+                    # Continue anyway - might be already logged in
+            else:
+                logger.warning("⚠️  Adaptive login configured but credentials not found")
+                await page.goto(url, wait_until="domcontentloaded")
+        else:
+            # Normal navigation
+            await page.goto(url, wait_until="domcontentloaded")
 
         return await self._get_page_state(tab_id)
 
